@@ -86,6 +86,8 @@ function normalizeFertilizerLandTypes(input: unknown) {
 const localSettings = ref({
   plantingStrategy: 'max_exp',
   preferredSeedId: 0,
+  bagSeedPriority: [] as number[],
+  bagSeedFallbackStrategy: 'level',
   stealDelaySeconds: 0,
   plantOrderRandom: false,
   plantDelaySeconds: 0,
@@ -135,6 +137,8 @@ function syncLocalSettings() {
     localSettings.value = JSON.parse(JSON.stringify({
       plantingStrategy: settings.value.plantingStrategy,
       preferredSeedId: settings.value.preferredSeedId,
+      bagSeedPriority: settings.value.bagSeedPriority ?? [],
+      bagSeedFallbackStrategy: settings.value.bagSeedFallbackStrategy ?? 'level',
       stealDelaySeconds: settings.value.stealDelaySeconds ?? 0,
       plantOrderRandom: !!settings.value.plantOrderRandom,
       plantDelaySeconds: settings.value.plantDelaySeconds ?? 0,
@@ -237,6 +241,16 @@ const plantingStrategyOptions = [
   { label: '最大普通肥经验/时', value: 'max_fert_exp' },
   { label: '最大净利润/时', value: 'max_profit' },
   { label: '最大普通肥净利润/时', value: 'max_fert_profit' },
+  { label: '背包种子优先', value: 'bag_priority' },
+]
+
+const BAG_FALLBACK_STRATEGY_OPTIONS = [
+  { label: '最高等级作物', value: 'level' },
+  { label: '最大经验/时', value: 'max_exp' },
+  { label: '最大普通肥经验/时', value: 'max_fert_exp' },
+  { label: '最大净利润/时', value: 'max_profit' },
+  { label: '最大普通肥净利润/时', value: 'max_fert_profit' },
+  { label: '优先种植种子', value: 'preferred' },
 ]
 
 const channelOptions = [
@@ -322,11 +336,132 @@ const analyticsSortByMap: Record<string, string> = {
 
 const strategyPreviewLabel = ref<string | null>(null)
 
+// 背包种子优先策略相关
+interface BagSeedItem {
+  seedId: number
+  name: string
+  count: number
+  requiredLevel: number
+  plantSize: number
+}
+
+const bagSeeds = ref<BagSeedItem[]>([])
+const bagSeedsLoading = ref(false)
+const bagSeedsError = ref<string | null>(null)
+const draggingBagSeedId = ref<number | null>(null)
+
+const sortedBagSeeds = computed(() => {
+  const priority = localSettings.value.bagSeedPriority || []
+  const indexMap = new Map<number, number>()
+  priority.forEach((seedId, index) => indexMap.set(seedId, index))
+
+  return [...bagSeeds.value].sort((a, b) => {
+    const aIndex = indexMap.has(a.seedId) ? indexMap.get(a.seedId)! : Number.MAX_SAFE_INTEGER
+    const bIndex = indexMap.has(b.seedId) ? indexMap.get(b.seedId)! : Number.MAX_SAFE_INTEGER
+    if (aIndex !== bIndex) return aIndex - bIndex
+    if (a.requiredLevel !== b.requiredLevel) return b.requiredLevel - a.requiredLevel
+    return a.seedId - b.seedId
+  })
+})
+
+async function fetchBagSeeds() {
+  if (!currentAccountId.value) return
+  bagSeedsLoading.value = true
+  bagSeedsError.value = null
+  try {
+    const res = await api.get('/api/bag/seeds', {
+      headers: { 'x-account-id': currentAccountId.value },
+    })
+    if (res.data.ok) {
+      bagSeeds.value = (res.data.data || []).filter((s: BagSeedItem) => s.plantSize === 1)
+    }
+  }
+  catch (e: any) {
+    bagSeedsError.value = e.message || '加载失败'
+  }
+  finally {
+    bagSeedsLoading.value = false
+  }
+}
+
+function resetBagSeedPriority() {
+  localSettings.value.bagSeedPriority = []
+}
+
+function moveBagSeed(seedId: number, direction: -1 | 1) {
+  const nextOrder = [...(localSettings.value.bagSeedPriority || [])]
+  const index = nextOrder.indexOf(seedId)
+  const targetIndex = index + direction
+  if (index < 0 || targetIndex < 0 || targetIndex >= nextOrder.length) return
+
+  const temp = nextOrder[index]!
+  nextOrder[index] = nextOrder[targetIndex]!
+  nextOrder[targetIndex] = temp
+  localSettings.value.bagSeedPriority = nextOrder
+}
+
+function startBagSeedDrag(seedId: number, event: DragEvent) {
+  draggingBagSeedId.value = seedId
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(seedId))
+  }
+}
+
+function dragOverBagSeed(_seedId: number, event: DragEvent) {
+  if (draggingBagSeedId.value === null) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function dropBagSeed(seedId: number, event: DragEvent) {
+  event.preventDefault()
+  const sourceSeedId = draggingBagSeedId.value ?? Number(event.dataTransfer?.getData('text/plain') || '')
+  if (!sourceSeedId || sourceSeedId === seedId) {
+    draggingBagSeedId.value = null
+    return
+  }
+
+  const nextOrder = [...(localSettings.value.bagSeedPriority || [])]
+  const sourceIndex = nextOrder.indexOf(sourceSeedId)
+  const targetIndex = nextOrder.indexOf(seedId)
+
+  if (sourceIndex < 0 && targetIndex < 0) {
+    nextOrder.push(sourceSeedId)
+  }
+  else if (sourceIndex < 0) {
+    nextOrder.splice(targetIndex, 0, sourceSeedId)
+  }
+  else if (targetIndex < 0) {
+    // 目标不在列表中，不做处理
+  }
+  else {
+    const temp = nextOrder[sourceIndex]
+    nextOrder.splice(sourceIndex, 1)
+    const newTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+    nextOrder.splice(newTargetIndex, 0, temp!)
+  }
+
+  localSettings.value.bagSeedPriority = nextOrder
+  draggingBagSeedId.value = null
+}
+
+// 监听策略变化，加载背包种子
+watchEffect(() => {
+  if (localSettings.value.plantingStrategy === 'bag_priority' && currentAccountId.value) {
+    fetchBagSeeds()
+  }
+})
+
 watchEffect(async () => {
-  const strategy = localSettings.value.plantingStrategy
+  let strategy = localSettings.value.plantingStrategy
   if (strategy === 'preferred') {
     strategyPreviewLabel.value = null
     return
+  }
+  // 背包种子优先策略使用第二优先策略预览
+  if (strategy === 'bag_priority') {
+    strategy = localSettings.value.bagSeedFallbackStrategy || 'level'
   }
   if (!seeds.value || seeds.value.length === 0) {
     strategyPreviewLabel.value = null
@@ -409,6 +544,8 @@ async function applyDefaultSettings() {
       localSettings.value = JSON.parse(JSON.stringify({
         plantingStrategy: defaultConfig.plantingStrategy || 'max_exp',
         preferredSeedId: defaultConfig.preferredSeedId || 0,
+        bagSeedPriority: defaultConfig.bagSeedPriority ?? [],
+        bagSeedFallbackStrategy: defaultConfig.bagSeedFallbackStrategy ?? 'level',
         stealDelaySeconds: defaultConfig.stealDelaySeconds ?? 1,
         plantOrderRandom: defaultConfig.plantOrderRandom ?? true,
         plantDelaySeconds: defaultConfig.plantDelaySeconds ?? 2,
@@ -542,12 +679,89 @@ async function handleTestOffline() {
               :options="preferredSeedOptions"
             />
             <div v-else class="flex flex-col gap-1.5">
-              <label class="text-sm text-gray-700 font-medium dark:text-gray-300">策略选种预览</label>
+              <label class="text-sm text-gray-700 font-medium dark:text-gray-300">
+                {{ localSettings.plantingStrategy === 'bag_priority' ? '第二优先策略预览' : '策略选种预览' }}
+              </label>
               <div
                 class="w-full flex items-center justify-between border border-gray-200 rounded-lg bg-gray-50 px-3 py-2 text-gray-500 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400"
               >
                 <span class="truncate">{{ strategyPreviewLabel ?? '加载中...' }}</span>
                 <div class="i-carbon-chevron-down shrink-0 text-lg text-gray-400" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 背包种子优先策略配置 -->
+          <div v-if="localSettings.plantingStrategy === 'bag_priority'" class="space-y-3">
+            <BaseSelect
+              v-model="localSettings.bagSeedFallbackStrategy"
+              label="第二优先策略"
+              :options="BAG_FALLBACK_STRATEGY_OPTIONS"
+            />
+            <div class="border border-amber-200 rounded-lg bg-amber-50/70 p-3 space-y-3 dark:border-amber-800/50 dark:bg-amber-900/20">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="text-sm text-amber-900 font-semibold dark:text-amber-200">
+                    背包种子优先顺序
+                  </div>
+                  <p class="mt-1 text-xs text-amber-700/90 dark:text-amber-300/90">
+                    先按下方顺序消耗背包中的 1x1 种子；背包种子不足时，再按"第二优先策略"补种。
+                  </p>
+                </div>
+                <button
+                  class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-700 transition hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-900/70"
+                  @click="resetBagSeedPriority"
+                >
+                  重置顺序
+                </button>
+              </div>
+              <div v-if="bagSeedsLoading" class="py-4 text-center text-sm text-amber-700 dark:text-amber-300">
+                加载中...
+              </div>
+              <div v-else-if="bagSeedsError" class="py-4 text-center text-sm text-red-600 dark:text-red-400">
+                {{ bagSeedsError }}
+              </div>
+              <div v-else-if="bagSeeds.length === 0" class="py-4 text-center text-sm text-amber-700 dark:text-amber-300">
+                背包中暂无 1x1 种子
+              </div>
+              <div v-else class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div
+                  v-for="(seed, index) in sortedBagSeeds"
+                  :key="seed.seedId"
+                  class="flex items-center gap-2 border border-amber-200 rounded-lg bg-white p-2 dark:border-amber-700/50 dark:bg-gray-800"
+                  draggable="true"
+                  @dragstart="startBagSeedDrag(seed.seedId, $event)"
+                  @dragover.prevent="dragOverBagSeed(seed.seedId, $event)"
+                  @drop="dropBagSeed(seed.seedId, $event)"
+                >
+                  <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-amber-100 text-xs text-amber-700 font-bold dark:bg-amber-900/50 dark:text-amber-300">
+                    {{ index + 1 }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate text-sm text-gray-800 font-medium dark:text-gray-200">
+                      {{ seed.name }}
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">
+                      数量: {{ seed.count }} | 等级: {{ seed.requiredLevel }}
+                    </div>
+                  </div>
+                  <div class="flex shrink-0 flex-col gap-1">
+                    <button
+                      class="rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+                      :disabled="index === 0"
+                      @click="moveBagSeed(seed.seedId, -1)"
+                    >
+                      <div class="i-carbon-arrow-up text-sm" />
+                    </button>
+                    <button
+                      class="rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+                      :disabled="index === sortedBagSeeds.length - 1"
+                      @click="moveBagSeed(seed.seedId, 1)"
+                    >
+                      <div class="i-carbon-arrow-down text-sm" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

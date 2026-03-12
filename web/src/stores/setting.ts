@@ -54,6 +54,8 @@ export interface UIConfig {
 export interface SettingsState {
   plantingStrategy: string
   preferredSeedId: number
+  bagSeedPriority: number[]
+  bagSeedFallbackStrategy: string
   intervals: IntervalsConfig
   friendQuietHours: FriendQuietHoursConfig
   automation: AutomationConfig
@@ -70,6 +72,8 @@ export const useSettingStore = defineStore('setting', () => {
   const settings = ref<SettingsState>({
     plantingStrategy: 'max_exp',
     preferredSeedId: 0,
+    bagSeedPriority: [],
+    bagSeedFallbackStrategy: 'level',
     intervals: {},
     friendQuietHours: { enabled: false, start: '23:00', end: '07:00' },
     automation: {},
@@ -121,6 +125,8 @@ export const useSettingStore = defineStore('setting', () => {
         settings.value.plantDelaySeconds = d.plantDelaySeconds ?? 0
         settings.value.fertilizerBuyType = d.fertilizerBuyType ?? 'organic'
         settings.value.fertilizerBuyCount = d.fertilizerBuyCount ?? 0
+        settings.value.bagSeedPriority = d.bagSeedPriority ?? []
+        settings.value.bagSeedFallbackStrategy = d.bagSeedFallbackStrategy ?? 'level'
       }
     }
     finally {
@@ -136,6 +142,8 @@ export const useSettingStore = defineStore('setting', () => {
       const settingsPayload = {
         plantingStrategy: newSettings.plantingStrategy,
         preferredSeedId: newSettings.preferredSeedId,
+        bagSeedPriority: newSettings.bagSeedPriority ?? [],
+        bagSeedFallbackStrategy: newSettings.bagSeedFallbackStrategy ?? 'level',
         intervals: newSettings.intervals,
         friendQuietHours: newSettings.friendQuietHours,
         stealDelaySeconds: newSettings.stealDelaySeconds ?? 0,

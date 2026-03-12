@@ -4,7 +4,7 @@
  */
 
 const protobuf = require('protobufjs');
-const { getFruitName, getPlantByFruitId, getPlantBySeedId, getItemById, getItemImageById } = require('../config/gameConfig');
+const { getFruitName, getPlantByFruitId, getPlantBySeedId, getItemById, getItemImageById, getSeedImageBySeedId } = require('../config/gameConfig');
 const { isAutomationOn } = require('../models/store');
 const { sendMsgAsync, networkEvents, getUserState } = require('../utils/network');
 const { types } = require('../utils/proto');
@@ -522,6 +522,34 @@ async function sellAllFruits() {
     }
 }
 
+async function getBagSeeds() {
+    const bagReply = await getBag();
+    const rawItems = getBagItems(bagReply);
+    const merged = new Map();
+
+    for (const item of (rawItems || [])) {
+        const seedId = toNum(item && item.id);
+        const count = toNum(item && item.count);
+        if (seedId <= 0 || count <= 0) continue;
+
+        const plant = getPlantBySeedId(seedId);
+        if (!plant) continue;
+
+        const current = merged.get(seedId) || {
+            seedId,
+            name: String(plant.name || `种子#${seedId}`),
+            count: 0,
+            requiredLevel: Math.max(0, Number(plant.land_level_need || 0)),
+            image: getSeedImageBySeedId(seedId) || getItemImageById(seedId),
+            plantSize: Math.max(1, Number(plant.size || 1)),
+        };
+        current.count += count;
+        merged.set(seedId, current);
+    }
+
+    return Array.from(merged.values());
+}
+
 module.exports = {
     getBag,
     getBagDetail,
@@ -537,4 +565,5 @@ module.exports = {
     sellAllFruits,
     getBagItems,
     getCurrentTotalsFromBag,
+    getBagSeeds,
 };

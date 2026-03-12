@@ -43,6 +43,8 @@ function createRuntimeState(options) {
             friendQuietHours: store.getFriendQuietHours(accountId),
             friendBlacklist: store.getFriendBlacklist(accountId),
             plantBlacklist: store.getPlantBlacklist(accountId),
+            knownFriendGids: store.getKnownFriendGids(accountId),
+            knownFriendGidSyncCooldownSec: store.getKnownFriendGidSyncCooldownSec(accountId),
             __revision: configRevision,
         };
     }

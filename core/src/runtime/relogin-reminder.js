@@ -14,8 +14,8 @@ function createReloginReminderService(options) {
 
     const reloginWatchers = new Map(); // key: accountId:loginCode
 
-    function getOfflineAutoDeleteMs() {
-        const cfg = store.getOfflineReminder ? store.getOfflineReminder() : null;
+    function getOfflineAutoDeleteMs(username = '') {
+        const cfg = store.getOfflineReminder ? store.getOfflineReminder(username) : null;
         const sec = Math.max(0, Number.parseInt(cfg && cfg.offlineDeleteSec, 10) || 0);
         if (sec === 0) return Infinity;
         return sec * 1000;
@@ -133,8 +133,40 @@ function createReloginReminderService(options) {
 
     async function triggerOfflineReminder(payload = {}) {
         try {
-            const cfg = store.getOfflineReminder ? store.getOfflineReminder() : null;
-            if (!cfg) return;
+            const accountId = String(payload.accountId || '').trim();
+            const accountName = String(payload.accountName || '').trim();
+            const reason = String(payload.reason || 'unknown');
+
+            log('系统', `触发下线提醒: 账号=${accountName || accountId}, 原因=${reason}`, {
+                accountId,
+                accountName,
+                reason,
+            });
+
+            // 查找账号对应的用户名
+            let username = '';
+            try {
+                const data = getAccounts();
+                const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+                const acc = accounts.find(a => String(a.id) === accountId);
+                if (acc && acc.username) {
+                    username = String(acc.username).trim();
+                }
+            } catch (e) {
+                log('错误', `查找账号用户名失败: ${e.message}`);
+            }
+
+            const cfg = store.getOfflineReminder ? store.getOfflineReminder(username) : null;
+            if (!cfg) {
+                log('错误', `未找到下线提醒配置: 用户=${username || '(空)'}`);
+                return;
+            }
+
+            log('系统', `下线提醒配置: 渠道=${cfg.channel}, 标题=${cfg.title}`, {
+                channel: cfg.channel,
+                title: cfg.title,
+                username,
+            });
 
             const channelName = String(cfg.channel || '').trim().toLowerCase();
             const reloginUrlMode = String(cfg.reloginUrlMode || 'none').trim().toLowerCase();
@@ -142,11 +174,16 @@ function createReloginReminderService(options) {
             const channel = channelName;
             const token = String(cfg.token || '').trim();
             const baseTitle = String(cfg.title || '').trim();
-            const accountName = String(payload.accountName || payload.accountId || '').trim();
             const title = accountName ? `${baseTitle} ${accountName}` : baseTitle;
             let content = String(cfg.msg || '').trim();
-            if (!channel || !token || !title || !content) return;
-            if (channel === 'webhook' && !endpoint) return;
+            if (!channel || !token || !title || !content) {
+                log('错误', `下线提醒配置不完整: channel=${channel}, token=${token ? '已设置' : '未设置'}, title=${title}, content=${content}`);
+                return;
+            }
+            if (channel === 'webhook' && !endpoint) {
+                log('错误', 'Webhook 渠道未设置接口地址');
+                return;
+            }
             if (reloginUrlMode === 'qq_link' || reloginUrlMode === 'qr_link') {
                 try {
                     const qr = await miniProgramLoginSession.requestLoginCode();

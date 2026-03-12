@@ -99,6 +99,7 @@ function createDataProvider(options) {
         doFriendOp: (accountRef, gid, opType) => callWorkerApi(resolveAccountRefId(accountRef), 'doFriendOp', gid, opType),
         doBatchFriendOp: (accountRef, opType) => callWorkerApi(resolveAccountRefId(accountRef), 'doBatchFriendOp', opType),
         getBag: (accountRef) => callWorkerApi(resolveAccountRefId(accountRef), 'getBag'),
+        getBagSeeds: (accountRef) => callWorkerApi(resolveAccountRefId(accountRef), 'getBagSeeds'),
         useItem: (accountRef, itemId, count) => callWorkerApi(resolveAccountRefId(accountRef), 'useItem', itemId, count),
         sellItems: (accountRef, items) => callWorkerApi(resolveAccountRefId(accountRef), 'sellItems', items),
         getDailyGifts: (accountRef) => callWorkerApi(resolveAccountRefId(accountRef), 'getDailyGiftOverview'),
@@ -136,6 +137,8 @@ function createDataProvider(options) {
                 plantDelaySeconds: body.plantDelaySeconds,
                 fertilizerBuyType: body.fertilizerBuyType,
                 fertilizerBuyCount: body.fertilizerBuyCount,
+                bagSeedPriority: body.bagSeedPriority,
+                bagSeedFallbackStrategy: body.bagSeedFallbackStrategy,
             };
             store.applyConfigSnapshot(snapshot, { accountId });
             const rev = nextConfigRevision();
@@ -150,6 +153,8 @@ function createDataProvider(options) {
                 plantDelaySeconds: store.getPlantDelaySeconds(accountId),
                 fertilizerBuyType: store.getFertilizerBuyType(accountId),
                 fertilizerBuyCount: store.getFertilizerBuyCount(accountId),
+                bagSeedPriority: store.getBagSeedPriority(accountId),
+                bagSeedFallbackStrategy: store.getBagSeedFallbackStrategy(accountId),
                 configRevision: rev,
             };
         },

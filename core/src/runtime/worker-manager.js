@@ -80,6 +80,7 @@ function createWorkerManager(options) {
             requests: new Map(), // pending API requests
             reqId: 1,
             name: account.name,
+            username: account.username || '', // 保存用户名用于下线提醒
             stopping: false,
             disconnectedSince: 0,
             autoDeleteTriggered: false,
@@ -230,7 +231,7 @@ function createWorkerManager(options) {
                 const now = Date.now();
                 if (!worker.disconnectedSince) worker.disconnectedSince = now;
                 const offlineMs = now - worker.disconnectedSince;
-                const autoDeleteMs = getOfflineAutoDeleteMs();
+                const autoDeleteMs = getOfflineAutoDeleteMs(worker.username);
                 if (!worker.autoDeleteTriggered && offlineMs >= autoDeleteMs) {
                     worker.autoDeleteTriggered = true;
                     const offlineMin = Math.floor(offlineMs / 60000);
@@ -238,6 +239,7 @@ function createWorkerManager(options) {
                     triggerOfflineReminder({
                         accountId,
                         accountName: worker.name,
+                        username: worker.username,
                         reason: 'offline_timeout',
                         offlineMs,
                     });
